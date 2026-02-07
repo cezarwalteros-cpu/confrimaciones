@@ -509,8 +509,8 @@
   // =========================
   var WEBHOOK_CONFIG = {
     // ⚠️ REEMPLAZA con tus URLs reales de n8n
-    ordenCompleta:     'https://TU-DOMINIO-N8N.com/webhook/orden-completa',
-    carritoAbandonado: 'https://TU-DOMINIO-N8N.com/webhook/carrito-abandonado',
+    ordenCompleta:     'https://programacioncwf.app.n8n.cloud/webhook/pedido-completo',
+    carritoAbandonado: 'https://programacioncwf.app.n8n.cloud/webhook/carrito-abandonado',
     // Minutos de inactividad para considerar abandono
     tiempoAbandono: 3,
     // Reintentos si falla el envío
