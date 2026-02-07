@@ -434,7 +434,7 @@
   };
 
   // =========================
-  // INIT (ORIGINAL - SIN CAMBIOS)
+  // INIT
   // =========================
   function initCore() {
     var email = document.querySelector('input[name="email"]');
@@ -471,7 +471,7 @@
   }
 
   // =========================
-  // BOOTSTRAP (ORIGINAL - SIN CAMBIOS)
+  // BOOTSTRAP
   // =========================
   function boot() { initCore(); }
 
@@ -493,324 +493,232 @@
   var mo = new MutationObserver(function () { boot(); });
   mo.observe(document.documentElement, { childList: true, subtree: true });
 
+})();
 
-  // ╔══════════════════════════════════════════════════════════════════════╗
-  // ║                                                                      ║
-  // ║  MÓDULO DE WEBHOOKS v2 - SEGURO Y AISLADO                           ║
-  // ║  Todo dentro de try-catch para NUNCA romper el código original       ║
-  // ║  NO toca fetch, NO toca XHR, NO usa MutationObserver agresivo       ║
-  // ║                                                                      ║
-  // ╚══════════════════════════════════════════════════════════════════════╝
 
+// ╔══════════════════════════════════════════════════════════════════════╗
+// ║  MÓDULO WEBHOOKS v3 - 100% AISLADO DEL CÓDIGO ORIGINAL             ║
+// ║  IIFE separado: si esto falla, el checkout sigue funcionando        ║
+// ║  NO modifica window.fetch, NO modifica XMLHttpRequest               ║
+// ║  NO agrega overlays, NO modifica el DOM del formulario              ║
+// ╚══════════════════════════════════════════════════════════════════════╝
+;(function() {
+  'use strict';
   try {
 
-  // =========================
-  // CONFIGURACIÓN
-  // =========================
-  var WEBHOOK_CONFIG = {
-    // ⚠️ REEMPLAZA con tus URLs reales de n8n
+  // ========== CONFIGURACIÓN ==========
+  // ⚠️ REEMPLAZA con tus URLs reales de n8n
+  var WEBHOOK_URLS = {
     ordenCompleta:     'https://programacioncwf.app.n8n.cloud/webhook/pedido-completo',
-    carritoAbandonado: 'https://programacioncwf.app.n8n.cloud/webhook/carrito-abandonado',
-    // Minutos de inactividad para considerar abandono
-    tiempoAbandono: 3,
-    // Reintentos si falla el envío
-    maxReintentos: 2,
-    // true = muestra logs en consola (poner false en producción)
-    debug: true
+    carritoAbandonado: 'https://programacioncwf.app.n8n.cloud/webhook/carrito-abandonado'
+  };
+  var TIEMPO_ABANDONO_MIN = 3;
+  var MAX_REINTENTOS = 2;
+  var DEBUG = true;
+
+  // ========== ESTADO ==========
+  var _st = {
+    ordenOk: false,
+    abandonoOk: false,
+    sid: 'ses_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8),
+    t0: new Date().toISOString(),
+    listo: false
   };
 
-  // =========================
-  // ESTADO INTERNO
-  // =========================
-  var _wh = {
-    ordenEnviada: false,
-    abandonoEnviado: false,
-    sessionId: 'ses_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8),
-    timestampInicio: new Date().toISOString(),
-    iniciado: false
-  };
+  function _log(m) { if (DEBUG) console.log('[WH] ' + m); }
 
-  function _log(msg) {
-    if (WEBHOOK_CONFIG.debug) console.log('[COD-CO][WH] ' + msg);
+  // ========== FORMATEAR TELÉFONO (copia local, no depende del IIFE original) ==========
+  function _fmtTel(v) {
+    var d = (v || '').replace(/\D/g, '');
+    if (d.indexOf('57') === 0 && d.length > 10) d = d.slice(2);
+    if (d.length > 10) d = d.slice(0, 10);
+    if (d.length === 10 && d.charAt(0) === '3') return '+57' + d;
+    return null;
   }
 
-  // =========================
-  // CAPTURA DE DATOS
-  // =========================
-  function _obtenerParam(param) {
-    try { return new URL(window.location.href).searchParams.get(param) || ''; }
+  // ========== LEER PARÁMETRO URL ==========
+  function _param(p) {
+    try { return new URL(window.location.href).searchParams.get(p) || ''; }
     catch(e) { return ''; }
   }
 
-  function _capturarDatos() {
-    var datos = {
-      nombre: '', apellido: '', telefono: '', telefonoFormateado: '',
-      telefonoValido: false, email: '',
-      ciudad: '', departamento: '', direccion: '', pais: 'CO',
-      producto: '', precio: 0, cantidad: 1,
-      sessionId: _wh.sessionId,
-      timestampInicio: _wh.timestampInicio,
+  // ========== LEER VALOR DE CAMPO ==========
+  function _val(name) {
+    try {
+      var el = document.querySelector('input[name="' + name + '"]');
+      return (el && el.value) ? el.value.trim() : '';
+    } catch(e) { return ''; }
+  }
+
+  function _selVal(name) {
+    try {
+      var el = document.querySelector('select[name="' + name + '"]');
+      return (el && el.value) ? el.value : '';
+    } catch(e) { return ''; }
+  }
+
+  // ========== CAPTURAR TODOS LOS DATOS ==========
+  function _datos() {
+    var tel = _val('phone');
+    var fmt = _fmtTel(tel);
+
+    var d = {
+      nombre: _val('first_name'),
+      apellido: _val('last_name'),
+      telefono: tel,
+      telefonoFormateado: fmt || '',
+      telefonoValido: !!fmt,
+      email: _val('email'),
+      ciudad: _val('shipping_city'),
+      departamento: _selVal('shipping_state'),
+      direccion: _val('shipping_address') || _val('address'),
+      pais: 'CO',
+      producto: '',
+      precio: 0,
+      cantidad: 1,
+      sessionId: _st.sid,
+      timestampInicio: _st.t0,
       timestampCaptura: new Date().toISOString(),
       paginaUrl: window.location.href,
       paginaTitulo: document.title || '',
-      fuente: _obtenerParam('utm_source'),
-      medio: _obtenerParam('utm_medium'),
-      campana: _obtenerParam('utm_campaign'),
-      fbclid: _obtenerParam('fbclid'),
-      gclid: _obtenerParam('gclid'),
+      fuente: _param('utm_source'),
+      medio: _param('utm_medium'),
+      campana: _param('utm_campaign'),
+      fbclid: _param('fbclid'),
+      gclid: _param('gclid'),
       referrer: document.referrer || ''
     };
 
-    // Leer campos del formulario
-    var mapeo = {
-      'first_name': 'nombre', 'last_name': 'apellido',
-      'phone': 'telefono', 'email': 'email',
-      'shipping_city': 'ciudad', 'shipping_address': 'direccion', 'address': 'direccion'
-    };
-    for (var sel in mapeo) {
-      try {
-        var el = document.querySelector('input[name="' + sel + '"]');
-        if (el && el.value && el.value.trim()) datos[mapeo[sel]] = el.value.trim();
-      } catch(e) {}
-    }
+    // Producto: varias fuentes seguras
+    try { if (window.funnel && window.funnel.product) {
+      d.producto = window.funnel.product.name || '';
+      d.precio = window.funnel.product.price || 0;
+    }} catch(e) {}
 
-    // Departamento
-    try {
-      var ds = document.querySelector('select[name="shipping_state"]');
-      if (ds && ds.value) datos.departamento = ds.value;
-    } catch(e) {}
-
-    // Formatear teléfono
-    if (datos.telefono) {
-      var fmt = formatearTelefono(datos.telefono);
-      if (fmt) { datos.telefonoFormateado = fmt; datos.telefonoValido = true; }
-    }
-
-    // Producto: intentar varias fuentes SIN tocar APIs globales
-    try {
-      if (window.funnel && window.funnel.product) {
-        datos.producto = window.funnel.product.name || '';
-        datos.precio = window.funnel.product.price || 0;
+    try { var ce = document.querySelector('[data-product-name]');
+      if (ce) {
+        if (!d.producto) d.producto = ce.getAttribute('data-product-name') || '';
+        if (!d.precio) d.precio = parseFloat(ce.getAttribute('data-product-price')) || 0;
       }
     } catch(e) {}
 
-    try {
-      var cartEl = document.querySelector('[data-product-name]');
-      if (cartEl) {
-        if (!datos.producto) datos.producto = cartEl.getAttribute('data-product-name') || '';
-        if (!datos.precio) datos.precio = parseFloat(cartEl.getAttribute('data-product-price')) || 0;
-      }
-    } catch(e) {}
-
-    // Producto desde H1 como último recurso
-    if (!datos.producto) {
-      try {
-        var h1 = document.querySelector('h1');
-        if (h1 && h1.textContent) datos.producto = h1.textContent.trim().slice(0, 100);
+    if (!d.producto) {
+      try { var h = document.querySelector('h1');
+        if (h) d.producto = h.textContent.trim().slice(0,100);
       } catch(e) {}
     }
 
-    // Precio desde elementos visibles como último recurso
-    if (!datos.precio) {
-      try {
-        var pels = document.querySelectorAll('[class*="price"], [class*="total"]');
-        for (var i = 0; i < pels.length; i++) {
-          var txt = (pels[i].textContent || '').replace(/[^\d.,]/g, '').replace(/\./g, '').replace(',', '.');
-          var n = parseFloat(txt);
-          if (n > 0) { datos.precio = n; break; }
+    if (!d.precio) {
+      try { var ps = document.querySelectorAll('[class*="price"], [class*="total"]');
+        for (var i = 0; i < ps.length; i++) {
+          var n = parseFloat((ps[i].textContent||'').replace(/[^\d.,]/g,'').replace(/\./g,'').replace(',','.'));
+          if (n > 0) { d.precio = n; break; }
         }
       } catch(e) {}
     }
 
-    return datos;
+    return d;
   }
 
-  // =========================
-  // ENVÍO DE WEBHOOK
-  // =========================
+  // ========== ENVIAR WEBHOOK ==========
   function _enviar(url, datos, tipo, intento) {
     intento = intento || 1;
-    var payload = JSON.stringify({ tipo: tipo, datos: datos, intento: intento, timestamp: new Date().toISOString() });
-
+    var body = JSON.stringify({ tipo: tipo, datos: datos, intento: intento, timestamp: new Date().toISOString() });
     _log(tipo + ' enviando (intento ' + intento + ')...');
 
-    // Para abandonos: usar sendBeacon (funciona al cerrar página)
+    // Abandonos: usar sendBeacon (funciona al cerrar página)
     if (tipo === 'carrito_abandonado' && navigator.sendBeacon) {
       try {
-        var blob = new Blob([payload], { type: 'application/json' });
-        var ok = navigator.sendBeacon(url, blob);
-        if (ok) { _log(tipo + ' ✓ enviado via sendBeacon'); return; }
+        if (navigator.sendBeacon(url, new Blob([body], {type:'application/json'}))) {
+          _log(tipo + ' ✓ sendBeacon'); return;
+        }
       } catch(e) {}
     }
 
-    // fetch normal (NO interceptamos window.fetch, lo usamos directo)
+    // XHR propio (NO modifica el global, crea instancia nueva)
     try {
-      var xhr = new XMLHttpRequest();
-      xhr.open('POST', url, true);
-      xhr.setRequestHeader('Content-Type', 'application/json');
-      xhr.onload = function() {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          _log(tipo + ' ✓ enviado (status ' + xhr.status + ')');
-        } else {
-          _log(tipo + ' ✗ error HTTP ' + xhr.status);
-          if (intento < WEBHOOK_CONFIG.maxReintentos) {
-            setTimeout(function() { _enviar(url, datos, tipo, intento + 1); }, 2000 * intento);
-          }
+      var x = new XMLHttpRequest();
+      x.open('POST', url, true);
+      x.setRequestHeader('Content-Type', 'application/json');
+      x.onload = function() {
+        if (x.status >= 200 && x.status < 300) { _log(tipo + ' ✓ (' + x.status + ')'); }
+        else if (intento < MAX_REINTENTOS) {
+          setTimeout(function(){ _enviar(url,datos,tipo,intento+1); }, 2000*intento);
         }
       };
-      xhr.onerror = function() {
-        _log(tipo + ' ✗ error de red');
-        if (intento < WEBHOOK_CONFIG.maxReintentos) {
-          setTimeout(function() { _enviar(url, datos, tipo, intento + 1); }, 2000 * intento);
-        }
+      x.onerror = function() {
+        if (intento < MAX_REINTENTOS) setTimeout(function(){ _enviar(url,datos,tipo,intento+1); }, 2000*intento);
       };
-      xhr.send(payload);
-    } catch(e) {
-      _log(tipo + ' ✗ excepción: ' + e.message);
-    }
+      x.send(body);
+    } catch(e) { _log(tipo + ' ✗ ' + e.message); }
   }
 
-  // =========================
-  // ORDEN COMPLETA
-  // =========================
-  function _enviarOrden() {
-    if (_wh.ordenEnviada) return;
-    var datos = _capturarDatos();
-    if (!datos.telefonoValido || !datos.nombre) {
-      _log('ORDEN: faltan datos mínimos (nombre + tel válido)');
-      return;
-    }
-    _wh.ordenEnviada = true;
-    _wh.abandonoEnviado = true; // Bloquear abandono
-    _log('ORDEN ✅ enviando a n8n...');
-    _enviar(WEBHOOK_CONFIG.ordenCompleta, datos, 'orden_completa');
+  // ========== ORDEN COMPLETA ==========
+  function _orden() {
+    if (_st.ordenOk) return;
+    var d = _datos();
+    if (!d.telefonoValido || !d.nombre) { _log('ORDEN: faltan datos'); return; }
+    _st.ordenOk = true;
+    _st.abandonoOk = true;
+    _log('ORDEN ✅');
+    _enviar(WEBHOOK_URLS.ordenCompleta, d, 'orden_completa');
   }
 
-  // =========================
-  // CARRITO ABANDONADO
-  // =========================
-  function _enviarAbandono(razon) {
-    if (_wh.ordenEnviada || _wh.abandonoEnviado) return;
-    var datos = _capturarDatos();
-    if (!datos.nombre || !datos.telefonoValido) {
-      _log('ABANDONO: faltan datos mínimos, no se envía');
-      return;
-    }
-    datos.razonAbandono = razon || 'desconocida';
-    _wh.abandonoEnviado = true;
-    _log('ABANDONO ⚠️ enviando a n8n (razón: ' + razon + ')');
-    _enviar(WEBHOOK_CONFIG.carritoAbandonado, datos, 'carrito_abandonado');
+  // ========== CARRITO ABANDONADO ==========
+  function _abandono(razon) {
+    if (_st.ordenOk || _st.abandonoOk) return;
+    var d = _datos();
+    if (!d.nombre || !d.telefonoValido) return;
+    d.razonAbandono = razon;
+    _st.abandonoOk = true;
+    _log('ABANDONO ⚠️ ' + razon);
+    _enviar(WEBHOOK_URLS.carritoAbandonado, d, 'carrito_abandonado');
   }
 
-  // =========================
-  // DETECTAR ORDEN COMPLETA
-  // Solo escucha clicks en el botón submit - NO toca fetch ni XHR
-  // =========================
-  function _instalarDeteccionOrden() {
-    if (window.__codWhOrdenOk) return;
-    window.__codWhOrdenOk = true;
+  // ========== DETECCIÓN DE ORDEN ==========
+  // Listener pasivo en bubbling (NO capture) - no interfiere con nada
+  document.addEventListener('click', function(e) {
+    try {
+      var t = e.target;
+      if (!t) return;
+      var btn = t.closest ? t.closest('a[href="#submit-step"]') : null;
+      if (!btn) return;
+      // Solo si teléfono válido
+      if (!_fmtTel(_val('phone'))) return;
+      // Esperar a que Funnelish procese
+      setTimeout(function() { try { _orden(); } catch(x){} }, 2000);
+    } catch(e) {}
+  }, false);
 
-    // Click en botón de submit (listener pasivo, no interfiere con nada)
-    document.addEventListener('click', function(e) {
-      try {
-        var target = e.target;
-        if (!target) return;
-        var btn = target.closest ? target.closest('a[href="#submit-step"]') : null;
-        if (!btn) return;
+  // ========== DETECCIÓN DE ABANDONO ==========
+  window.addEventListener('beforeunload', function() {
+    try { _abandono('cerro_pagina'); } catch(e) {}
+  });
 
-        // Solo si el teléfono es válido (la orden va a pasar)
-        var phone = document.querySelector('input[name="phone"]');
-        if (!phone) return;
-        var fmt = formatearTelefono(phone.value);
-        if (!fmt) return;
+  document.addEventListener('visibilitychange', function() {
+    try { if (document.visibilityState === 'hidden') _abandono('cambio_pestana'); } catch(e) {}
+  });
 
-        // Esperar a que Funnelish procese y verificar que no haya error
-        setTimeout(function() {
-          try {
-            // Verificar si Funnelish mostró un error propio (NO buscar [class*="error"] genérico)
-            var funnelishError = document.querySelector('.funnelish-error, .checkout-error, .form-error-message');
-            if (funnelishError && funnelishError.offsetParent !== null) {
-              _log('ORDEN: Funnelish mostró error, no se envía');
-              return;
-            }
-            _enviarOrden();
-          } catch(e) { _log('Error en detección post-click: ' + e.message); }
-        }, 2000);
-      } catch(e) {}
-    }, false); // false = NO capture, no interfiere con el código original
+  window.addEventListener('pagehide', function() {
+    try { _abandono('pagehide'); } catch(e) {}
+  });
 
-    _log('Detector de orden instalado ✓');
+  // Inactividad
+  var _tInact = null;
+  function _resetI() {
+    if (_tInact) clearTimeout(_tInact);
+    _tInact = setTimeout(function() {
+      try { _abandono('inactividad_' + TIEMPO_ABANDONO_MIN + 'min'); } catch(e) {}
+    }, TIEMPO_ABANDONO_MIN * 60000);
   }
+  ['click','keydown','scroll','touchstart'].forEach(function(ev) {
+    document.addEventListener(ev, _resetI, {passive:true});
+  });
+  _resetI();
 
-  // =========================
-  // DETECTAR ABANDONO
-  // Listeners simples y seguros
-  // =========================
-  function _instalarDeteccionAbandono() {
-    if (window.__codWhAbandonoOk) return;
-    window.__codWhAbandonoOk = true;
+  _log('Módulo v3 listo ✓ (sid: ' + _st.sid + ')');
 
-    // 1. Cierra pestaña / navega fuera
-    window.addEventListener('beforeunload', function() {
-      try { _enviarAbandono('cerro_pagina'); } catch(e) {}
-    });
-
-    // 2. Cambia de pestaña / minimiza
-    document.addEventListener('visibilitychange', function() {
-      try {
-        if (document.visibilityState === 'hidden') _enviarAbandono('cambio_pestana');
-      } catch(e) {}
-    });
-
-    // 3. iOS/Safari backup
-    window.addEventListener('pagehide', function() {
-      try { _enviarAbandono('pagehide'); } catch(e) {}
-    });
-
-    // 4. Inactividad prolongada
-    var _timerInactividad = null;
-    function _resetTimer() {
-      try {
-        if (_timerInactividad) clearTimeout(_timerInactividad);
-        _timerInactividad = setTimeout(function() {
-          try { _enviarAbandono('inactividad_' + WEBHOOK_CONFIG.tiempoAbandono + 'min'); } catch(e) {}
-        }, WEBHOOK_CONFIG.tiempoAbandono * 60 * 1000);
-      } catch(e) {}
-    }
-    ['click', 'keydown', 'scroll', 'touchstart'].forEach(function(evt) {
-      document.addEventListener(evt, _resetTimer, { passive: true });
-    });
-    _resetTimer();
-
-    _log('Detector de abandono instalado ✓');
+  } catch(fatalErr) {
+    console.error('[WH] Error fatal (checkout NO afectado):', fatalErr.message);
   }
-
-  // =========================
-  // INICIAR MÓDULO DE WEBHOOKS
-  // Se ejecuta una sola vez, después de que el DOM esté listo
-  // =========================
-  function _initWebhooks() {
-    if (_wh.iniciado) return;
-    _wh.iniciado = true;
-    _instalarDeteccionOrden();
-    _instalarDeteccionAbandono();
-    _log('Módulo de webhooks v2 iniciado ✓ (session: ' + _wh.sessionId + ')');
-  }
-
-  // Iniciar webhooks DESPUÉS de un delay para no interferir con el boot original
-  setTimeout(function() {
-    try { _initWebhooks(); } catch(e) { console.error('[COD-CO][WH] Error init:', e.message); }
-  }, 2000);
-
-  // Reintentar por si el DOM no estaba listo
-  setTimeout(function() {
-    try { _initWebhooks(); } catch(e) {}
-  }, 5000);
-
-  } catch(webhookError) {
-    // Si CUALQUIER cosa falla en el módulo de webhooks, simplemente lo ignoramos
-    // El código original sigue funcionando perfectamente
-    console.error('[COD-CO][WH] Error en módulo webhooks (el checkout sigue funcionando):', webhookError.message);
-  }
-
 })();
