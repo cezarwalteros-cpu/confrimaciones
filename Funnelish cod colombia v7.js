@@ -1,9 +1,4 @@
-<script>
 (function(){
-    
-    // ==========================================
-    // BASE DE DATOS CIUDADES Y DEPARTAMENTOS
-    // ==========================================
     
     var ciudadesColombia = {
         "Leticia": "Amazonas", "Puerto Nariño": "Amazonas",
@@ -58,10 +53,6 @@
     
     var listaCiudades = Object.keys(ciudadesColombia).sort();
     
-    // ==========================================
-    // FUNCIONES
-    // ==========================================
-    
     function generarEmail() {
         return 'cliente' + Math.random().toString().slice(2,10) + Date.now().toString().slice(-4) + '@codcolombia.co';
     }
@@ -105,7 +96,6 @@
             if (select.options[i].value === depto) {
                 select.selectedIndex = i;
                 select.dispatchEvent(new Event('change', {bubbles: true}));
-                console.log('✅ Departamento:', depto);
                 break;
             }
         }
@@ -158,19 +148,11 @@
         });
     }
     
-    // ==========================================
-    // INICIALIZACIÓN
-    // ==========================================
-    
     function init() {
-        console.log('🚀 COD Colombia v7...');
-        
-        // Email
         var email = document.querySelector('input[name="email"]');
         if (email) email.value = generarEmail();
         ocultarCampo('email');
         
-        // País
         var pais = document.querySelector('select[name="shipping_country"]');
         if (pais) {
             for (var i = 0; i < pais.options.length; i++) {
@@ -183,11 +165,9 @@
         }
         ocultarCampo('shipping_country');
         
-        // Departamento
         inyectarDepartamentos();
         ocultarCampo('shipping_state');
         
-        // Ciudad
         var ciudad = document.querySelector('input[name="shipping_city"]');
         if (ciudad) {
             ciudad.placeholder = 'Escribe tu ciudad...';
@@ -195,25 +175,20 @@
             crearAutocompletado(ciudad);
         }
         
-        // Teléfono
         var tel = document.querySelector('input[name="phone"]');
         if (tel) {
             tel.addEventListener('blur', function() {
                 if (this.value.trim()) this.value = formatearTelefono(this.value);
             });
         }
-        
-        console.log('✅ COD Colombia listo!');
     }
     
-    // Ejecutar
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function() { setTimeout(init, 500); });
     } else {
         setTimeout(init, 500);
     }
     
-    // Validar antes de enviar
     document.addEventListener('submit', function() {
         var tel = document.querySelector('input[name="phone"]');
         var email = document.querySelector('input[name="email"]');
@@ -225,4 +200,3 @@
     }, true);
     
 })();
-</script>
